@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OpenVPN for GKE - Vlad Panchenko</title>
+    <link rel="stylesheet" href="../style.css">
+</head>
+<body>
+
+    <div class="container">
+        <a href="../devops.html" class="back-link">← Back to DevOps</a>
+        
+        <h2>OpenVPN for private Kubernetes cluster</h2>
+        
+        <div class="content">
+            <h3>The Problem</h3>
+            <p>Securing a GKE cluster means entirely disabling its public endpoint. However, once the cluster is completely private, administrators and developers lose the ability to easily access the control plane (Master nodes) or interact directly with the cluster services and pods for debugging purposes.</p>
+
+            <h3>The Architecture</h3>
+            <p>In a standard private GKE setup, the network is strictly segmented:</p>
+            <ul>
+                <li><strong>Master Nodes:</strong> Located in a Google-managed <code>172.x.x.x</code> peering subnet.</li>
+                <li><strong>Nodes and Services:</strong> Placed in a <code>172.x.x.x</code> VPC subnet.</li>
+                <li><strong>Pods:</strong> Assigned IPs from a secondary <code>10.x.x.x</code> subnet.</li>
+            </ul>
+
+            <h3>The Fix</h3>
+            <p>The most cost-effective and controllable solution is to deploy a lightweight GCP Compute Engine instance running an OpenVPN server inside the same VPC as your GKE cluster.</p>
+            
+            <p>By configuring the OpenVPN server to push the specific routing rules to connected clients, you can seamlessly access all cluster layers from your local machine.</p>
+
+            <p><strong>Required VPN Routing Configuration:</strong></p>
+            <ul>
+                <li>Push a route for the Master Node subnet (<code>172.x.x.x/28</code>) so <code>kubectl</code> commands work natively over the VPN.</li>
+                <li>Push a route for the Node/Service subnet (<code>172.x.x.x/16</code>) to allow direct access to NodePorts and internal LoadBalancers.</li>
+                <li>Push a route for the Pod subnet (<code>10.x.x.x/14</code>) to allow direct curling of pod IPs for deep debugging.</li>
+            </ul>
+
+            <p>With this setup, simply connecting your local machine to the OpenVPN client profile gives you transparent, secure access to the entire private Kubernetes perimeter as if you were sitting inside the GCP datacenter.</p>
+        </div>
+    </div>
+</body>
+</html>

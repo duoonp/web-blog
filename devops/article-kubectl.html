@@ -3,29 +3,96 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Easy development without rebuilds: magic of kubectl cp</title>
+    <title>Magic of kubectl cp - Vlad Panchenko</title>
     <link rel="stylesheet" href="../style.css">
+    <style>
+        pre {
+            background-color: #2b2b2b;
+            color: #f8f8f2;
+            padding: 1.5rem;
+            border-radius: 8px;
+            overflow-x: auto;
+            font-size: 0.9rem;
+            margin-bottom: 2rem;
+        }
+        code { font-family: Consolas, Monaco, 'Andale Mono', monospace; }
+    </style>
 </head>
 <body>
 
     <div class="container">
-        <a href="../index.html" class="back-link">← Back to Main Page</a>
+        <a href="../devops.html" class="back-link">← Back to DevOps</a>
         
         <h2>Easy development without rebuilds: magic of kubectl cp</h2>
         
-        
         <div class="content">
-            <p>Your recipe or article text goes here...</p>
+            <h3>The Problem</h3>
+            <p>The traditional inner development loop on Kubernetes is brutally slow. If you make a one-line code change, you typically have to build a new Docker image, push it to a registry, update the deployment manifest, and wait for the pod to roll out. This can take minutes for every minor tweak, destroying developer momentum.</p>
+
+            <h3>The Fix</h3>
+            <p>You can bypass the build-and-push cycle entirely by running a development pod with <code>sleep infinity</code> as its entrypoint (PID 1). This keeps the pod alive without locking the main process. </p>
+            <p>We can then use a set of bash scripts wrapped around <code>kubectl cp</code> to hot-sync local code changes directly into the running container, stop the old backend process, and spin up the new one in seconds.</p>
+
+            <h3>The Scripts</h3>
             
-            <h3>Ingredients:</h3>
-            <ul>
-                <li>Ingredient 1</li>
-                <li>Ingredient 2</li>
-            </ul>
+            <h4>1. The Main Router (<code>sync.sh</code>)</h4>
+            <p>This script dictates whether we are just syncing code, just restarting the backend, or doing both.</p>
+<pre><code>#!/bin/bash
+CONTAINER=$1
+ACTION=$2
 
+case $ACTION in
+  restart)
+   bash scripts/01_sync_code.sh $CONTAINER
+   bash scripts/02_restart_backend.sh $CONTAINER restart
+  ;;
+  code-sync)
+   bash scripts/01_sync_code.sh $CONTAINER
+  ;;
+  backend-restart)
+   bash scripts/02_restart_backend.sh $CONTAINER restart
+  ;;
+esac
+</code></pre>
 
+            <h4>2. Code Synchronization (<code>01_sync_code.sh</code>)</h4>
+            <p>This script dynamically finds the pod and copies the local application directory and scripts straight into the container's filesystem.</p>
+<pre><code>CONTAINER=$1
+
+POD_NAME=$(kubectl get pod -l "app=$CONTAINER" -o jsonpath="{.items[0].metadata.name}")
+
+kubectl exec -c $CONTAINER $POD_NAME -- mkdir -p /root/.config/mc
+kubectl cp -c $CONTAINER ./mc/hotlist $POD_NAME:/root/.config/mc/hotlist
+
+kubectl cp ./app -c $CONTAINER $POD_NAME:/app/
+kubectl cp pyproject.toml -c $CONTAINER $POD_NAME:/app/pyproject.toml
+kubectl cp ./scripts/start_web_ui.sh -c $CONTAINER $POD_NAME:/app/scripts/start_web_ui.sh
+kubectl cp ./scripts/stop.sh -c $CONTAINER $POD_NAME:/app/scripts/stop.sh
+
+echo "Code sync for $CONTAINER completed."
+echo ""
+</code></pre>
+
+            <h4>3. Backend Restart (<code>02_restart_backend.sh</code>)</h4>
+            <p>Once the fresh code is inside, this script executes a stop command, and then starts the UI/backend as a background process, redirecting logs to the container's standard output so they are still viewable via <code>kubectl logs</code>.</p>
+<pre><code>#!/bin/bash
+
+CONTAINER=$1
+POD_NAME=$(kubectl get pod -l "app=$CONTAINER" -o jsonpath="{.items[0].metadata.name}")
+
+kubectl exec $POD_NAME -c $CONTAINER  -- bash /app/scripts/stop.sh
+echo "Backend stopped for $CONTAINER"
+
+kubectl exec $POD_NAME -c $CONTAINER  -- /bin/sh -c "nohup bash /app/scripts/start_web_ui.sh &gt; /proc/1/fd/1  2&gt; /proc/1/fd/2 &amp;"
+echo "Backend restarted for $CONTAINER"
+echo ""
+
+echo "Logs:"
+echo "kubectl logs -f $POD_NAME -c $CONTAINER"
+
+echo "https://my-service.my-local.domain"
+</code></pre>
         </div>
     </div>
-
 </body>
 </html>
